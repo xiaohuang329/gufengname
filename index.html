@@ -580,18 +580,115 @@ function reverseMatch(input){const cs=extractChars(input);if(!cs.length)return[]
 function buildCardHTML(rid,name,sources,info){const faved=isFaved(name);const sj=escapeAttr(JSON.stringify(sources));const sr=info&&(info.mode==='same'||info.mode==='single'||info.mode==='imageryDouble'||info.mode==='imagerySingle');const cu=info&&info.history&&info.history.length>0;return `<button class="star-btn ${faved?'on':''}" data-name="${escapeAttr(name)}" onclick="toggleFav('${escapeAttr(name)}',${sj},event)">${faved?'★':'☆'}</button><div class="name-text" onclick="copyName('${escapeAttr(name)}')">${escapeHtml(name)}</div><div class="name-source">${sources.map(s=>`<b>${escapeHtml(s.chars||s.char)}</b> · ${escapeHtml(s.from)}<span class="quote">「${renderQuote(s.quote,s.chars||s.char)}」</span>`).join('')}</div><div class="card-actions">${sr?`<button class="refresh-btn" onclick="refreshCard('${rid}',event)">↻ 换字</button>`:''}${sr?`<button class="undo-btn" ${cu?'':'disabled'} onclick="undoCard('${rid}',event)">↶ 返回</button>`:''}<button class="del-src-btn" onclick="deleteSourceByRid('${rid}',event)">× 删源</button></div>`}
 function renderCard(rid,name,sources,info){const c=document.getElementById('card-'+rid);if(!c)return;c.innerHTML=buildCardHTML(rid,name,sources,info)}
 
-function refreshCard(rid,ev){if(ev){ev.stopPropagation();ev.preventDefault()}const info=REFRESH_INFO[rid];if(!info){showToast('不支持换字');return}
-const snap={name:info.surname+info.chars,surname:info.surname,chars:info.chars,sources:JSON.parse(JSON.stringify(RESULT_STORE[rid]||[]))};
+function refreshCard(rid,ev){
+if(ev){ev.stopPropagation();ev.preventDefault()}
+const info=REFRESH_INFO[rid];
+if(!info){showToast('不支持换字');return}
 const mode=document.getElementById('refreshMode').value;
+
+const snap={
+name:info.surname+info.chars,
+surname:info.surname,
+chars:info.chars,
+sources:JSON.parse(JSON.stringify(RESULT_STORE[rid]||[]))
+};
+if(!info.history)info.history=[];
+if(info.history.length>=20)info.history.shift();
+info.history.push(snap);
+
 if(info.mode==='imageryDouble'){
 const pool=getWhitelistedBigrams();
 if(!pool.length){showToast('没有可用词');return}
-for(let t=0;t<30;t++){const bg=rand(pool);if(bg===info.chars)continue;const idx=BIGRAM_INDEX[bg];if(!idx||!idx.length)continue;const entry=rand(idx);const ns=mode==='given'?info.surname:rand(SINGLE_SURNAMES);if(!info.history)info.history=[];if(info.history.length>=20)info.history.shift();info.history.push(snap);RESULT_STORE[rid]=[];info.surname=ns;info.chars=bg;renderCard(rid,ns+bg,[{chars:bg,from:`《${entry.work}》· ${entry.title}`,quote:entry.quote+'。'}],info);return}
-showToast('抽不出新词');return}
-if(info.mode==='imagerySingle'){const p=POEMS.find(x=>x.id===info.poemId);if(!p){showToast('源诗失效');return}const cs=Object.entries(CHAR_FREQ).filter(([c,f])=>f>=20&&!isExcluded(c)&&isUsableChar(c)).map(([c])=>c);if(!cs.length)return;for(let t=0;t<30;t++){const c=rand(cs);if(c===info.chars)continue;const q=p.groups.join('，');if(!q.includes(c))continue;const ns=mode==='given'?info.surname:rand(SINGLE_SURNAMES);if(!info.history)info.history=[];if(info.history.length>=20)info.history.shift();info.history.push(snap);RESULT_STORE[rid]=[{entryId:p.id,groups:[q]}];info.surname=ns;info.chars=c;renderCard(rid,ns+c,[{chars:ns+c,from:`《${p.workName}》· ${p.poemTitle}`,quote:q+'。'}],info);return}showToast('抽不出新字');return}
-if(info.mode==='same'){const p=POEMS.find(x=>x.id===info.poemId);if(!p){showToast('源诗失效');return}let ns=info.surname,nc=info.chars,nq=null;if(mode!=='surname')ns=rand(SINGLE_SURNAMES);if(mode==='given'){nc=info.chars;if(RESULT_STORE[rid]&&RESULT_STORE[rid][0]&&RESULT_STORE[rid][0].quote)nq=RESULT_STORE[rid][0].quote;else nq=info.rangeGroups.join('。')+'。'}else{const r=pickTwoFromRange(info.rangeGroups,mode==='surname'?info.chars:null);if(!r){showToast('抽不出新字');return}nc=r.chars;nq=r.quote}const src=[{chars:nc,from:`《${p.workName}》· ${p.poemTitle}`,quote:nq}];if(!info.history)info.history=[];if(info.history.length>=20)info.history.shift();info.history.push(snap);RESULT_STORE[rid]=[{entryId:p.id,groups:info.rangeGroups}];info.surname=ns;info.chars=nc;renderCard(rid,ns+nc,src,info);return}
-if(info.mode==='single'){const p=POEMS.find(x=>x.id===info.poemId);if(!p){showToast('源诗失效');return}let ns=info.surname;if(mode!=='surname')ns=rand(SINGLE_SURNAMES);const ex=(mode==='surname'&&ns===info.surname)?info.chars:null;const r=pickOneFromPoem(p,ns,ex);if(!r){showToast('抽不出新字');return}const src=[{chars:ns+r.char,from:`《${p.workName}》· ${p.poemTitle}`,quote:r.quote+'。'}];if(!info.history)info.history=[];if(info.history.length>=20)info.history.shift();info.history.push(snap);RESULT_STORE[rid]=[{entryId:p.id,groups:[r.quote]}];info.surname=ns;info.chars=r.char;renderCard(rid,ns+r.char,src,info)}}
+let newSurname=info.surname;
+let newBg=info.chars;
+if(mode==='surname'){
+newSurname=info.surname;
+let found=null;
+for(let t=0;t<60;t++){const bg=rand(pool);if(bg!==info.chars){found=bg;break}}
+if(!found){showToast('抽不出新词');return}
+newBg=found;
+}else if(mode==='given'){
+newSurname=rand(SINGLE_SURNAMES);
+newBg=info.chars;
+}else{
+newSurname=rand(SINGLE_SURNAMES);
+let found=null;
+for(let t=0;t<60;t++){const bg=rand(pool);if(bg!==info.chars){found=bg;break}}
+if(found)newBg=found;
+}
+const idx=BIGRAM_INDEX[newBg];
+if(!idx||!idx.length){showToast('词源失效');return}
+const entry=rand(idx);
+RESULT_STORE[rid]=[];
+info.surname=newSurname;
+info.chars=newBg;
+renderCard(rid,newSurname+newBg,[{chars:newBg,from:`《${entry.work}》· ${entry.title}`,quote:entry.quote+'。'}],info);
+return;
+}
 
+if(info.mode==='imagerySingle'){
+const p=POEMS.find(x=>x.id===info.poemId);
+if(!p){showToast('源诗失效');return}
+const cs=Object.entries(CHAR_FREQ).filter(([c,f])=>f>=20&&!isExcluded(c)&&isUsableChar(c)).map(([c])=>c);
+if(!cs.length){showToast('无可用字');return}
+const quote=p.groups.join('，');
+let newSurname=info.surname;
+let newChar=info.chars;
+if(mode==='surname'){
+newSurname=info.surname;
+let found=null;
+for(let t=0;t<80;t++){const c=rand(cs);if(c===info.chars)continue;if(quote.includes(c)){found=c;break}}
+if(!found){showToast('抽不出新字');return}
+newChar=found;
+}else if(mode==='given'){
+newSurname=rand(SINGLE_SURNAMES);
+newChar=info.chars;
+}else{
+newSurname=rand(SINGLE_SURNAMES);
+let found=null;
+for(let t=0;t<80;t++){const c=rand(cs);if(c===info.chars)continue;if(quote.includes(c)){found=c;break}}
+if(found)newChar=found;
+}
+RESULT_STORE[rid]=[{entryId:p.id,groups:[quote]}];
+info.surname=newSurname;
+info.chars=newChar;
+renderCard(rid,newSurname+newChar,[{chars:newSurname+newChar,from:`《${p.workName}》· ${p.poemTitle}`,quote:quote+'。'}],info);
+return;
+}
+
+if(info.mode==='same'){
+const p=POEMS.find(x=>x.id===info.poemId);
+if(!p){showToast('源诗失效');return}
+let ns=info.surname,nc=info.chars,nq=null;
+if(mode!=='surname')ns=rand(SINGLE_SURNAMES);
+if(mode==='given'){
+nc=info.chars;
+if(RESULT_STORE[rid]&&RESULT_STORE[rid][0]&&RESULT_STORE[rid][0].quote)nq=RESULT_STORE[rid][0].quote;
+else nq=info.rangeGroups.join('。')+'。';
+}else{
+const r=pickTwoFromRange(info.rangeGroups,mode==='surname'?info.chars:null);
+if(!r){showToast('抽不出新字');return}
+nc=r.chars;nq=r.quote;
+}
+RESULT_STORE[rid]=[{entryId:p.id,groups:info.rangeGroups}];
+info.surname=ns;info.chars=nc;
+renderCard(rid,ns+nc,[{chars:nc,from:`《${p.workName}》· ${p.poemTitle}`,quote:nq}],info);
+return;
+}
+
+if(info.mode==='single'){
+const p=POEMS.find(x=>x.id===info.poemId);
+if(!p){showToast('源诗失效');return}
+let ns=info.surname;
+if(mode!=='surname')ns=rand(SINGLE_SURNAMES);
+const ex=(mode==='surname'&&ns===info.surname)?info.chars:null;
+const r=pickOneFromPoem(p,ns,ex);
+if(!r){showToast('抽不出新字');return}
+RESULT_STORE[rid]=[{entryId:p.id,groups:[r.quote]}];
+info.surname=ns;info.chars=r.char;
+renderCard(rid,ns+r.char,[{chars:ns+r.char,from:`《${p.workName}》· ${p.poemTitle}`,quote:r.quote+'。'}],info);
+}
+}
 function undoCard(rid,ev){if(ev){ev.stopPropagation();ev.preventDefault()}const info=REFRESH_INFO[rid];if(!info||!info.history||!info.history.length)return;const pr=info.history.pop();info.surname=pr.surname;info.chars=pr.chars;RESULT_STORE[rid]=pr.sources;renderCard(rid,pr.name,pr.sources,info)}
 
 function setMode(m,b){MODE=m;document.querySelectorAll('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('row-len').classList.toggle('hidden',m==='reverse');document.getElementById('row-refresh').classList.toggle('hidden',m==='reverse');document.getElementById('row-imagery').classList.toggle('hidden',m!=='imagery');document.getElementById('row-reverse').classList.toggle('hidden',m!=='reverse');document.getElementById('scope-panel').classList.add('hidden');document.getElementById('results').innerHTML='';document.getElementById('info').textContent=''}
