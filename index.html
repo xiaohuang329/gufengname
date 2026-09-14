@@ -266,6 +266,7 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;background:#8a6d3b;bo
 <script src="data.js"></script>
 <script src="weijin.js"></script>
 <script src="guwen.js"></script>
+<script src="whitelist.js"></script>
 <script>
 let CORPUS=Object.assign({},window.CORPUS_DATA||{});
 if(window.WEIJIN_DATA){for(const[k,v]of Object.entries(window.WEIJIN_DATA))CORPUS[k]=v}
@@ -275,6 +276,7 @@ let _t2cn=null;
 function initOpenCC(){try{const O=window.OpenCC||window.opencc;if(O&&O.Converter){_t2cn=O.Converter({from:'tw',to:'cn'});console.log('[OpenCC] OK');return true}return false}catch(e){return false}}
 function toSimplified(s){if(!s)return s;if(_t2cn)return _t2cn(s);return s}
 
+/* IndexedDB */
 const IDB_NAME='gufeng_db_v1',IDB_STORE='cache',CACHE_KEY_INDEX='index_v4';
 const IDB_ONLINE_KEY='online_poems_v1';
 function openIDB(){return new Promise((res,rej)=>{const r=indexedDB.open(IDB_NAME,1);r.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE)};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
@@ -282,8 +284,9 @@ async function idbGet(k){try{const db=await openIDB();return new Promise((res,re
 async function idbSet(k,v){try{const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');const r=tx.objectStore(IDB_STORE).put(v,k);r.onsuccess=()=>res();r.onerror=()=>rej(r.error)})}catch(e){}}
 async function idbClearAll(){try{const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');const r=tx.objectStore(IDB_STORE).clear();r.onsuccess=()=>res();r.onerror=()=>rej(r.error)})}catch(e){}}
 
-function computeIndexHash(){const ex=[...getExcludedSet()].sort().join('');let h1=0;for(let i=0;i<ex.length;i++)h1=((h1<<5)-h1+ex.charCodeAt(i))|0;const ws=getDrawableKeys();const cs=ws.map(k=>k+':'+CORPUS[k].length).join('|');let h2=0;for(let i=0;i<cs.length;i++)h2=((h2<<5)-h2+cs.charCodeAt(i))|0;return `v9_${h1}_${h2}`}
+function computeIndexHash(){const ex=[...getExcludedSet()].sort().join('');let h1=0;for(let i=0;i<ex.length;i++)h1=((h1<<5)-h1+ex.charCodeAt(i))|0;const ws=getDrawableKeys();const cs=ws.map(k=>k+':'+CORPUS[k].length).join('|');let h2=0;for(let i=0;i<cs.length;i++)h2=((h2<<5)-h2+cs.charCodeAt(i))|0;return `v7_${h1}_${h2}`}
 
+/* GB2312 */
 function buildLevelChars(s,e){const b=[];for(let q=s;q<=e;q++)for(let w=1;w<=94;w++)b.push(q+160,w+160);try{const t=new TextDecoder('gbk').decode(new Uint8Array(b));return new Set([...t].filter(c=>/[\u4e00-\u9fa5]/.test(c)))}catch(e){return null}}
 const LEVEL1_CHARS=buildLevelChars(16,55);
 const LEVEL2_CHARS=buildLevelChars(56,87);
@@ -332,9 +335,23 @@ const SINGLE_SURNAMES=[...new Set([
 '肖','闫','银','朴','佘','墨','年','阳','佟','言','楚','沐','洛','霜','雪','月','曦','霄','澜','沚','澈','岚','雾','冰','露','霞','虹','夜','玄','冥','寒','清','澹','静','逸','远','渊','深','疏','孤','兰','竹','莲','荷','蕊','苓','芷','蘅','薇','芸','茉','棠','桑','桐','枫','杉','檀','槐','龙','风','鹤','雁','鹿','鸾','鸢','剑','琴','书','画','镜','笛','箫','笙','铃','钗','镯','青','苍','素','缃','缥','黛','绯','绛','乌','君','临','望','知','聆','弦','筝','阅','引','拂','挽','携','揽','握','往','归','还','留','行','止','待','逢','遇','别','离','商','齐','许','祝','柯','岑','凌','尹','岳','尉','司','容','姬','嬴','妃','淮','湘','寻','朔','蕙','芍','蓉','芜','蔓'
 ])].filter(c=>/[\u4e00-\u9fa5]/.test(c));
 
-let CHAR_FREQ={},BIGRAM_FREQ={},BIGRAM_INDEX={},BIGRAM_THRESHOLD=5,BIGRAM_READY=false;
+let CHAR_FREQ={},BIGRAM_FREQ={},BIGRAM_INDEX={},BIGRAM_THRESHOLD=5;
 let POEMS=[],POEMS_BY_WORK={},CANDIDATE_CHARS=new Set(),INDEX_READY=false,BUILDING=false,SISHU_MERGED=null;
 const RESULT_STORE={},REFRESH_INFO={};
+
+/* 白名单 */
+let WHITELIST=new Set();
+let WHITELIST_READY=false;
+function loadWhitelist(){
+if(window.WHITELIST_DATA&&Array.isArray(window.WHITELIST_DATA)){
+WHITELIST=new Set(window.WHITELIST_DATA);
+WHITELIST_READY=true;
+console.log(`[白名单] 加载 ${WHITELIST.size} 个双字词`);
+}else{
+console.warn('[白名单] 未找到 WHITELIST_DATA');
+WHITELIST_READY=false;
+}
+}
 
 function makeRid(){return 'r'+Math.random().toString(36).slice(2,10)}
 function computeCandidates(){CANDIDATE_CHARS=new Set();for(const[c,f]of Object.entries(CHAR_FREQ)){if(isExcluded(c))continue;if(isLevel1(c)){CANDIDATE_CHARS.add(c);continue}if(isLevel2(c)&&f>=SLIDER_VALUE)CANDIDATE_CHARS.add(c)}const el=document.getElementById('candidateCount');if(el)el.textContent=`${CANDIDATE_CHARS.size} 字`}
@@ -356,17 +373,19 @@ if(BUILDING)return;BUILDING=true;INDEX_READY=false;
 const gb=document.getElementById('genBtn');if(gb)gb.disabled=true;
 const se=document.getElementById('freqStatus'),le=document.getElementById('loadStatus'),ce=document.getElementById('cacheStatus');
 const t0=Date.now();const ch=computeIndexHash();
-if(!force){le.textContent='检查缓存…';const ca=await idbGet(CACHE_KEY_INDEX);if(ca&&ca.hash===ch&&ca.poems&&ca.freq){POEMS=ca.poems;CHAR_FREQ=ca.freq;applyBlacklistToPoems();computeCandidates();INDEX_READY=true;BUILDING=false;const e=((Date.now()-t0)/1000).toFixed(2);le.textContent=`缓存加载（${e}s）· ${POEMS.length} 篇`;if(se)se.textContent=`缓存命中（${e}s）`;if(ce)ce.textContent=`已缓存 · ${new Date(ca.time).toLocaleString()}`;if(gb)gb.disabled=false;updateBlacklistCount();renderScopeList();doGenerate();updateOnlineStatus();return}}
-CHAR_FREQ={};POEMS=[];
+if(!force){le.textContent='检查缓存…';const ca=await idbGet(CACHE_KEY_INDEX);if(ca&&ca.hash===ch&&ca.poems&&ca.freq){POEMS=ca.poems;CHAR_FREQ=ca.freq;BIGRAM_FREQ=ca.bigrams||{};BIGRAM_INDEX=ca.bigramIndex||{};applyBlacklistToPoems();computeCandidates();INDEX_READY=true;BUILDING=false;const e=((Date.now()-t0)/1000).toFixed(2);le.textContent=`缓存加载（${e}s）· ${POEMS.length} 篇`;if(se)se.textContent=`缓存命中（${e}s）`;if(ce)ce.textContent=`已缓存 · ${new Date(ca.time).toLocaleString()}`;if(gb)gb.disabled=false;updateBlacklistCount();renderScopeList();doGenerate();updateOnlineStatus();return}}
+CHAR_FREQ={};BIGRAM_FREQ={};BIGRAM_INDEX={};POEMS=[];
 const ws=getDrawableKeys(),tot=ws.length;let wi=0;
-for(const w of ws){const ps=CORPUS[w];for(const p of ps){const s=toSimplified(p.text);const rg=s.split(/[。！？\n]/);const gr=[];for(const g of rg){const t=g.trim();if(t.length<4)continue;let c=0;const sn=new Set();for(const ch2 of t){if(!/[\u4e00-\u9fa5]/.test(ch2))continue;if(isExcluded(ch2))continue;if(!isLevel1(ch2)&&!isLevel2(ch2))continue;CHAR_FREQ[ch2]=(CHAR_FREQ[ch2]||0)+1;if(!sn.has(ch2)){sn.add(ch2);c++}}if(c<2)continue;gr.push(t)}if(!gr.length)continue;const id=w+'||'+(p.title||'无题')+'||'+gr[0];POEMS.push({id,groups:gr,workName:w,poemTitle:p.title})}wi++;if(wi%2===0){const pct=Math.round(wi/tot*100);if(le)le.textContent=`索引中… ${pct}%`;await new Promise(r=>setTimeout(r,0))}}
-try{await idbSet(CACHE_KEY_INDEX,{hash:ch,poems:POEMS,freq:CHAR_FREQ,time:Date.now()});if(ce)ce.textContent=`已缓存 · ${new Date().toLocaleString()}`}catch(e){}
+for(const w of ws){const ps=CORPUS[w];for(const p of ps){const s=toSimplified(p.text);const rg=s.split(/[。！？\n]/);const gr=[];for(const g of rg){const t=g.trim();if(t.length<4)continue;let c=0;const sn=new Set();for(const ch2 of t){if(!/[\u4e00-\u9fa5]/.test(ch2))continue;if(isExcluded(ch2))continue;if(!isLevel1(ch2)&&!isLevel2(ch2))continue;CHAR_FREQ[ch2]=(CHAR_FREQ[ch2]||0)+1;if(!sn.has(ch2)){sn.add(ch2);c++}}if(c<2)continue;gr.push(t);
+for(let bi=0;bi<t.length-1;bi++){const b1=t[bi],b2=t[bi+1];if(!/[\u4e00-\u9fa5]/.test(b1)||!/[\u4e00-\u9fa5]/.test(b2))continue;if(isExcluded(b1)||isExcluded(b2))continue;const bg=b1+b2;BIGRAM_FREQ[bg]=(BIGRAM_FREQ[bg]||0)+1;if(!BIGRAM_INDEX[bg])BIGRAM_INDEX[bg]=[];if(BIGRAM_INDEX[bg].length<5)BIGRAM_INDEX[bg].push({work:w,title:p.title,quote:t})}
+}if(!gr.length)continue;const id=w+'||'+(p.title||'无题')+'||'+gr[0];POEMS.push({id,groups:gr,workName:w,poemTitle:p.title})}wi++;if(wi%2===0){const pct=Math.round(wi/tot*100);if(le)le.textContent=`索引中… ${pct}%`;await new Promise(r=>setTimeout(r,0))}}
+try{await idbSet(CACHE_KEY_INDEX,{hash:ch,poems:POEMS,freq:CHAR_FREQ,bigrams:BIGRAM_FREQ,bigramIndex:BIGRAM_INDEX,time:Date.now()});if(ce)ce.textContent=`已缓存 · ${new Date().toLocaleString()}`}catch(e){}
 applyBlacklistToPoems();computeCandidates();INDEX_READY=true;BUILDING=false;
 const e=((Date.now()-t0)/1000).toFixed(1);if(se)se.textContent=`就绪（${e}s）`;if(le)le.textContent=`完成 · ${POEMS.length} 篇 · ${CANDIDATE_CHARS.size} 候选字`;
 if(gb)gb.disabled=false;updateBlacklistCount();renderScopeList();doGenerate();updateOnlineStatus();
 }
 function onSliderChange(v){SLIDER_VALUE=parseInt(v);saveSlider();document.getElementById('sliderValue').textContent=SLIDER_VALUE;if(INDEX_READY){computeCandidates();showToast(`范围：${CANDIDATE_CHARS.size} 字`)}}
-function onBigramSlider(v){BIGRAM_THRESHOLD=parseInt(v);localStorage.setItem(LS_BIGRAM,String(BIGRAM_THRESHOLD));document.getElementById('bigramValue').textContent=BIGRAM_THRESHOLD;if(BIGRAM_READY)doGenerate()}
+function onBigramSlider(v){BIGRAM_THRESHOLD=parseInt(v);localStorage.setItem(LS_BIGRAM,String(BIGRAM_THRESHOLD));document.getElementById('bigramValue').textContent=BIGRAM_THRESHOLD;if(INDEX_READY)doGenerate()}
 
 function rand(a){return a[Math.floor(Math.random()*a.length)]}
 function extractChars(t){return [...t].filter(c=>/[\u4e00-\u9fa5]/.test(c)&&!isExcluded(c))}
@@ -393,7 +412,7 @@ function deleteSourceByRid(rid,ev){if(ev){ev.stopPropagation();ev.preventDefault
 
 function clearBlacklist(){if(!blacklistCount()){showToast('没有删源记录');return}if(!confirm('清空所有删源记录？'))return;BLACKLIST={};saveBlacklist();updateBlacklistCount();showToast('已清空，重建索引…');buildIndex(true)}
 function updateBlacklistCount(){const e=document.getElementById('blacklistCount');if(e)e.textContent=blacklistCount();const e2=document.getElementById('sumDeleted');if(e2)e2.textContent=blacklistCount()}
-async function clearIndexCache(){if(!confirm('清空索引缓存？'))return;await idbClearAll();BIGRAM_READY=false;const e=document.getElementById('cacheStatus');if(e)e.textContent='已清空';showToast('索引缓存已清空')}
+async function clearIndexCache(){if(!confirm('清空索引缓存？'))return;await idbClearAll();const e=document.getElementById('cacheStatus');if(e)e.textContent='已清空';showToast('索引缓存已清空')}
 
 const FAV_KEY='gufeng_favs_v2';let MODE='same',FAVS=[];
 function loadFavs(){try{const r=localStorage.getItem(FAV_KEY);if(r)FAVS=JSON.parse(r)}catch(e){}updateFavBadge()}
@@ -407,6 +426,7 @@ function switchTab(t,b){document.querySelectorAll('.tab-btn').forEach(x=>x.class
 
 function renderFavView(){const el=document.getElementById('favResults'),c=document.getElementById('favCount');c.textContent=`共 ${FAVS.length} 个收藏`;if(!FAVS.length){el.innerHTML='<div class="empty">还没有收藏任何名字。</div>';return}el.innerHTML=FAVS.map(f=>`<div class="name-card"><button class="star-btn on" data-name="${escapeAttr(f.name)}" onclick="toggleFav('${escapeAttr(f.name)}',null,event)">★</button><div class="name-text" onclick="copyName('${escapeAttr(f.name)}')">${escapeHtml(f.name)}</div><div class="name-source">${f.sources.map(s=>`<b>${escapeHtml(s.chars||s.char)}</b> · ${escapeHtml(s.from)}<span class="quote">「${renderQuote(s.quote,s.chars||s.char)}」</span>`).join('')}</div></div>`).join('')}
 
+/* 语料库视图 */
 function renderCorpusView(){
 const ws=Object.keys(CORPUS).filter(k=>CORPUS[k]&&CORPUS[k].length);
 const tp=ws.reduce((a,k)=>a+CORPUS[k].length,0);
@@ -445,6 +465,7 @@ function addWhitelist(){const i=document.getElementById('whitelistInput'),c=i.va
 function removeWhitelist(c){const i=USER_WHITELIST.indexOf(c);if(i>=0)USER_WHITELIST.splice(i,1);saveUserFilters();renderCustomFilters();document.getElementById('excludeBody').textContent=[...getExcludedSet()].join(' ');if(INDEX_READY)computeCandidates()}
 function refreshAll(){buildIndex(true)}
 
+/* 在线语料 */
 const POETRY_API='https://poetry-api.snowtraces.com/v1/works';
 const ONLINE_CATEGORY='在线·诗泉';
 async function loadOnlinePoems(){
@@ -477,7 +498,6 @@ pf.style.width='100%';
 statusEl.textContent=`第 ${page} 页：拉到 ${list.length} 首，新增 ${fresh.length} 首，累计 ${merged.length} 首`;
 addOnlineToCorpus(merged);
 await appendOnlineToIndex(fresh);
-BIGRAM_READY=false;
 computeCandidates();
 doGenerate();
 renderCorpusView();
@@ -488,39 +508,66 @@ function extractWorksFromResponse(json){if(Array.isArray(json))return json;if(js
 function extractText(item){if(Array.isArray(item.content))return item.content.join('');if(typeof item.content==='string')return item.content;if(Array.isArray(item.paragraphs))return item.paragraphs.join('');if(typeof item.text==='string')return item.text;return''}
 function addOnlineToCorpus(list){if(!list.length)return;if(!CORPUS[ONLINE_CATEGORY])CORPUS[ONLINE_CATEGORY]=[];const keys=new Set(CORPUS[ONLINE_CATEGORY].map(p=>(p.title||'')+'|'+(p.text||'').slice(0,10)));for(const p of list){const k=(p.title||'')+'|'+(p.text||'').slice(0,10);if(keys.has(k))continue;keys.add(k);CORPUS[ONLINE_CATEGORY].push(p)}}
 async function appendOnlineToIndex(list){for(const poem of list){const s=toSimplified(poem.text);const rg=s.split(/[。！？\n]/);const gr=[];for(const g of rg){const t=g.trim();if(t.length<4)continue;let c=0;const sn=new Set();for(const ch of t){if(!/[\u4e00-\u9fa5]/.test(ch))continue;if(isExcluded(ch))continue;if(!isLevel1(ch)&&!isLevel2(ch))continue;CHAR_FREQ[ch]=(CHAR_FREQ[ch]||0)+1;if(!sn.has(ch)){sn.add(ch);c++}}if(c<2)continue;gr.push(t)}if(!gr.length)continue;const id=ONLINE_CATEGORY+'||'+(poem.title||'无题')+'||'+gr[0];if(POEMS.some(p=>p.id===id))continue;const entry={id,groups:gr,workName:ONLINE_CATEGORY,poemTitle:poem.title};POEMS.push(entry);if(!POEMS_BY_WORK[ONLINE_CATEGORY])POEMS_BY_WORK[ONLINE_CATEGORY]=[];POEMS_BY_WORK[ONLINE_CATEGORY].push(entry)}}
-async function clearOnlinePoems(){if(!confirm('清空所有在线语料？'))return;await idbSet(IDB_ONLINE_KEY,[]);delete CORPUS[ONLINE_CATEGORY];POEMS=POEMS.filter(p=>p.workName!==ONLINE_CATEGORY);rebuildPoemsByWork();BIGRAM_READY=false;showToast('已清空，重建索引…');await buildIndex(true)}
+async function clearOnlinePoems(){if(!confirm('清空所有在线语料？'))return;await idbSet(IDB_ONLINE_KEY,[]);delete CORPUS[ONLINE_CATEGORY];POEMS=POEMS.filter(p=>p.workName!==ONLINE_CATEGORY);rebuildPoemsByWork();showToast('已清空，重建索引…');await buildIndex(true)}
 async function updateOnlineStatus(){const list=await idbGet(IDB_ONLINE_KEY)||[];const el=document.getElementById('onlineStatus');if(el)el.textContent=`当前在线语料：${list.length} 首`}
 
-async function buildBigramsLazy(){
-if(BIGRAM_READY)return;
-showToast('正在统计双字词…');
-BIGRAM_FREQ={};BIGRAM_INDEX={};
-const t0=Date.now();
-for(const p of POEMS){
-for(const t of p.groups){
-for(let bi=0;bi<t.length-1;bi++){
-const b1=t[bi],b2=t[bi+1];
-if(!/[\u4e00-\u9fa5]/.test(b1)||!/[\u4e00-\u9fa5]/.test(b2))continue;
-if(isExcluded(b1)||isExcluded(b2))continue;
-const bg=b1+b2;
-BIGRAM_FREQ[bg]=(BIGRAM_FREQ[bg]||0)+1;
-if(!BIGRAM_INDEX[bg])BIGRAM_INDEX[bg]=[];
-if(BIGRAM_INDEX[bg].length<2)BIGRAM_INDEX[bg].push({work:p.workName,title:p.poemTitle,quote:t});
+/* 意象取名：用白名单过滤 */
+function getValidBigrams(){
+const list=[];
+for(const[bg,freq]of Object.entries(BIGRAM_FREQ)){
+if(freq<BIGRAM_THRESHOLD)continue;
+if(!BIGRAM_INDEX[bg]||!BIGRAM_INDEX[bg].length)continue;
+const c1=bg[0],c2=bg[1];
+if(isExcluded(c1)||isExcluded(c2))continue;
+list.push(bg);
 }
+return list;
 }
-}
-BIGRAM_READY=true;
-const e=((Date.now()-t0)/1000).toFixed(1);
-console.log(`[bigram] 完成，${Object.keys(BIGRAM_FREQ).length} 个，用时 ${e}s`);
-showToast(`双字词统计完成（${e}s）`);
+function getWhitelistedBigrams(){
+if(!WHITELIST_READY||WHITELIST.size===0)return [];
+return getValidBigrams().filter(bg=>WHITELIST.has(bg));
 }
 
-function getValidBigrams(){if(!BIGRAM_READY)return[];const list=[];for(const[bg,freq]of Object.entries(BIGRAM_FREQ)){if(freq<BIGRAM_THRESHOLD)continue;if(!BIGRAM_INDEX[bg]||!BIGRAM_INDEX[bg].length)continue;const c1=bg[0],c2=bg[1];if(isExcluded(c1)||isExcluded(c2))continue;list.push(bg)}return list}
+function genImageryDouble(){
+const pool=getWhitelistedBigrams();
+if(!pool.length)return null;
+for(let t=0;t<30;t++){
+const bg=rand(pool);
+const idx=BIGRAM_INDEX[bg];
+if(!idx||!idx.length)continue;
+const entry=rand(idx);
+const surname=rand(SINGLE_SURNAMES);
+const rid=makeRid();
+RESULT_STORE[rid]=[];
+REFRESH_INFO[rid]={mode:'imageryDouble',bigram:bg,surname:surname,chars:bg,history:[]};
+return{rid,name:surname+bg,sources:[{chars:bg,from:`《${entry.work}》· ${entry.title}`,quote:entry.quote+'。'}]};
+}
+return null;
+}
 
-function genImageryDouble(){const pool=getValidBigrams();if(!pool.length)return null;for(let t=0;t<30;t++){const bg=rand(pool);const idx=BIGRAM_INDEX[bg];if(!idx||!idx.length)continue;const entry=rand(idx);const surname=rand(SINGLE_SURNAMES);const rid=makeRid();RESULT_STORE[rid]=[];REFRESH_INFO[rid]={mode:'imageryDouble',bigram:bg,surname:surname,chars:bg,history:[]};return{rid,name:surname+bg,sources:[{chars:bg,from:`《${entry.work}》· ${entry.title}`,quote:entry.quote+'。'}]}}return null}
+function genImagerySingle(){
+const candidates=Object.entries(CHAR_FREQ).filter(([c,f])=>f>=20&&!isExcluded(c)&&isUsableChar(c)).map(([c])=>c);
+if(!candidates.length)return null;
+const active=getActiveDrawableKeys();
+if(!active.length)return null;
+for(let t=0;t<60;t++){
+const c=rand(candidates);
+for(let i=0;i<20;i++){
+const poem=pickRandomPoem(active);
+if(!poem)continue;
+const quote=poem.groups.join('，');
+if(!quote.includes(c))continue;
+const surname=rand(SINGLE_SURNAMES);
+const rid=makeRid();
+RESULT_STORE[rid]=[{entryId:poem.id,groups:[quote]}];
+REFRESH_INFO[rid]={mode:'imagerySingle',char:c,surname:surname,chars:c,poemId:poem.id,history:[]};
+return{rid,name:surname+c,sources:[{chars:surname+c,from:`《${poem.workName}》· ${poem.poemTitle}`,quote:quote+'。'}]};
+}
+}
+return null;
+}
 
-function genImagerySingle(){const candidates=Object.entries(CHAR_FREQ).filter(([c,f])=>f>=20&&!isExcluded(c)&&isUsableChar(c)).map(([c])=>c);if(!candidates.length)return null;const active=getActiveDrawableKeys();if(!active.length)return null;for(let t=0;t<60;t++){const c=rand(candidates);for(let i=0;i<20;i++){const poem=pickRandomPoem(active);if(!poem)continue;const quote=poem.groups.join('，');if(!quote.includes(c))continue;const surname=rand(SINGLE_SURNAMES);const rid=makeRid();RESULT_STORE[rid]=[{entryId:poem.id,groups:[quote]}];REFRESH_INFO[rid]={mode:'imagerySingle',char:c,surname:surname,chars:c,poemId:poem.id,history:[]};return{rid,name:surname+c,sources:[{chars:surname+c,from:`《${poem.workName}》· ${poem.poemTitle}`,quote:quote+'。'}]}}}return null}
-
+/* 生成主流程 */
 function genSame(){if(!INDEX_READY||!POEMS.length||!SINGLE_SURNAMES.length)return null;const a=getActiveDrawableKeys();if(!a.length)return null;const sn=rand(SINGLE_SURNAMES);for(let i=0;i<30;i++){const p=pickRandomPoem(a);if(!p)continue;const r=pickTwoFromPoem(p);if(!r)continue;const rid=makeRid();RESULT_STORE[rid]=[{entryId:p.id,groups:r.rangeGroups}];REFRESH_INFO[rid]={mode:'same',poemId:p.id,rangeGroups:r.rangeGroups,surname:sn,chars:r.chars,history:[]};return{rid,name:sn+r.chars,sources:[{chars:r.chars,from:`《${p.workName}》· ${p.poemTitle}`,quote:r.quote}]}}return null}
 
 function genSameSingle(){if(!INDEX_READY||!POEMS.length||!SINGLE_SURNAMES.length)return null;const a=getActiveDrawableKeys();if(!a.length)return null;for(let i=0;i<60;i++){const sn=rand(SINGLE_SURNAMES);const p=pickRandomPoem(a);if(!p)continue;const r=pickOneFromPoem(p,sn);if(!r)continue;const rid=makeRid();RESULT_STORE[rid]=[{entryId:p.id,groups:[r.quote]}];REFRESH_INFO[rid]={mode:'single',poemId:p.id,surname:sn,chars:r.char,history:[]};return{rid,name:sn+r.char,sources:[{chars:sn+r.char,from:`《${p.workName}》· ${p.poemTitle}`,quote:r.quote+'。'}]}}return null}
@@ -529,23 +576,119 @@ function genCross(){if(!INDEX_READY||!POEMS.length||!SINGLE_SURNAMES.length)retu
 
 function reverseMatch(input){const cs=extractChars(input);if(!cs.length)return[];const ms=[];for(const w of getMatchableKeys()){for(const p of CORPUS[w]){const s=toSimplified(p.text);const hit=cs.filter(c=>s.includes(c));if(hit.length>0)ms.push({score:hit.length,workName:w,title:p.title,hits:hit,quote:findLine(s,hit)})}}ms.sort((a,b)=>b.score-a.score);return ms.slice(0,30)}
 
+/* 卡片 */
 function buildCardHTML(rid,name,sources,info){const faved=isFaved(name);const sj=escapeAttr(JSON.stringify(sources));const sr=info&&(info.mode==='same'||info.mode==='single'||info.mode==='imageryDouble'||info.mode==='imagerySingle');const cu=info&&info.history&&info.history.length>0;return `<button class="star-btn ${faved?'on':''}" data-name="${escapeAttr(name)}" onclick="toggleFav('${escapeAttr(name)}',${sj},event)">${faved?'★':'☆'}</button><div class="name-text" onclick="copyName('${escapeAttr(name)}')">${escapeHtml(name)}</div><div class="name-source">${sources.map(s=>`<b>${escapeHtml(s.chars||s.char)}</b> · ${escapeHtml(s.from)}<span class="quote">「${renderQuote(s.quote,s.chars||s.char)}」</span>`).join('')}</div><div class="card-actions">${sr?`<button class="refresh-btn" onclick="refreshCard('${rid}',event)">↻ 换字</button>`:''}${sr?`<button class="undo-btn" ${cu?'':'disabled'} onclick="undoCard('${rid}',event)">↶ 返回</button>`:''}<button class="del-src-btn" onclick="deleteSourceByRid('${rid}',event)">× 删源</button></div>`}
 function renderCard(rid,name,sources,info){const c=document.getElementById('card-'+rid);if(!c)return;c.innerHTML=buildCardHTML(rid,name,sources,info)}
 
 function refreshCard(rid,ev){
 if(ev){ev.stopPropagation();ev.preventDefault()}
-const info=REFRESH_INFO[rid];if(!info){showToast('不支持换字');return}
+const info=REFRESH_INFO[rid];
+if(!info){showToast('不支持换字');return}
 const mode=document.getElementById('refreshMode').value;
-const snap={name:info.surname+info.chars,surname:info.surname,chars:info.chars,sources:JSON.parse(JSON.stringify(RESULT_STORE[rid]||[]))};
+
+const snap={
+name:info.surname+info.chars,
+surname:info.surname,
+chars:info.chars,
+sources:JSON.parse(JSON.stringify(RESULT_STORE[rid]||[]))
+};
 if(!info.history)info.history=[];
 if(info.history.length>=20)info.history.shift();
 info.history.push(snap);
-if(info.mode==='imageryDouble'){const pool=getValidBigrams();if(!pool.length){showToast('没有可用词');return}let ns=info.surname,nb=info.chars;if(mode==='surname'){let f=null;for(let t=0;t<60;t++){const bg=rand(pool);if(bg!==info.chars){f=bg;break}}if(!f){showToast('抽不出新词');return}nb=f}else if(mode==='given'){ns=rand(SINGLE_SURNAMES)}else{ns=rand(SINGLE_SURNAMES);let f=null;for(let t=0;t<60;t++){const bg=rand(pool);if(bg!==info.chars){f=bg;break}}if(f)nb=f}const idx=BIGRAM_INDEX[nb];if(!idx||!idx.length){showToast('词源失效');return}const entry=rand(idx);RESULT_STORE[rid]=[];info.surname=ns;info.chars=nb;renderCard(rid,ns+nb,[{chars:nb,from:`《${entry.work}》· ${entry.title}`,quote:entry.quote+'。'}],info);return}
-if(info.mode==='imagerySingle'){const p=POEMS.find(x=>x.id===info.poemId);if(!p){showToast('源诗失效');return}const cs=Object.entries(CHAR_FREQ).filter(([c,f])=>f>=20&&!isExcluded(c)&&isUsableChar(c)).map(([c])=>c);if(!cs.length){showToast('无可用字');return}const q=p.groups.join('，');let ns=info.surname,nc=info.chars;if(mode==='surname'){let f=null;for(let t=0;t<80;t++){const c=rand(cs);if(c===info.chars)continue;if(q.includes(c)){f=c;break}}if(!f){showToast('抽不出新字');return}nc=f}else if(mode==='given'){ns=rand(SINGLE_SURNAMES)}else{ns=rand(SINGLE_SURNAMES);let f=null;for(let t=0;t<80;t++){const c=rand(cs);if(c===info.chars)continue;if(q.includes(c)){f=c;break}}if(f)nc=f}RESULT_STORE[rid]=[{entryId:p.id,groups:[q]}];info.surname=ns;info.chars=nc;renderCard(rid,ns+nc,[{chars:ns+nc,from:`《${p.workName}》· ${p.poemTitle}`,quote:q+'。'}],info);return}
-if(info.mode==='same'){const p=POEMS.find(x=>x.id===info.poemId);if(!p){showToast('源诗失效');return}let ns=info.surname,nc=info.chars,nq=null;if(mode!=='surname')ns=rand(SINGLE_SURNAMES);if(mode==='given'){nc=info.chars;if(RESULT_STORE[rid]&&RESULT_STORE[rid][0]&&RESULT_STORE[rid][0].quote)nq=RESULT_STORE[rid][0].quote;else nq=info.rangeGroups.join('。')+'。'}else{const r=pickTwoFromRange(info.rangeGroups,mode==='surname'?info.chars:null);if(!r){showToast('抽不出新字');return}nc=r.chars;nq=r.quote}RESULT_STORE[rid]=[{entryId:p.id,groups:info.rangeGroups}];info.surname=ns;info.chars=nc;renderCard(rid,ns+nc,[{chars:nc,from:`《${p.workName}》· ${p.poemTitle}`,quote:nq}],info);return}
-if(info.mode==='single'){const p=POEMS.find(x=>x.id===info.poemId);if(!p){showToast('源诗失效');return}let ns=info.surname;if(mode!=='surname')ns=rand(SINGLE_SURNAMES);const ex=(mode==='surname'&&ns===info.surname)?info.chars:null;const r=pickOneFromPoem(p,ns,ex);if(!r){showToast('抽不出新字');return}RESULT_STORE[rid]=[{entryId:p.id,groups:[r.quote]}];info.surname=ns;info.chars=r.char;renderCard(rid,ns+r.char,[{chars:ns+r.char,from:`《${p.workName}》· ${p.poemTitle}`,quote:r.quote+'。'}],info)}
+
+if(info.mode==='imageryDouble'){
+const pool=getWhitelistedBigrams();
+if(!pool.length){showToast('没有可用词');return}
+let newSurname=info.surname;
+let newBg=info.chars;
+if(mode==='surname'){
+newSurname=info.surname;
+let found=null;
+for(let t=0;t<60;t++){const bg=rand(pool);if(bg!==info.chars){found=bg;break}}
+if(!found){showToast('抽不出新词');return}
+newBg=found;
+}else if(mode==='given'){
+newSurname=rand(SINGLE_SURNAMES);
+newBg=info.chars;
+}else{
+newSurname=rand(SINGLE_SURNAMES);
+let found=null;
+for(let t=0;t<60;t++){const bg=rand(pool);if(bg!==info.chars){found=bg;break}}
+if(found)newBg=found;
+}
+const idx=BIGRAM_INDEX[newBg];
+if(!idx||!idx.length){showToast('词源失效');return}
+const entry=rand(idx);
+RESULT_STORE[rid]=[];
+info.surname=newSurname;
+info.chars=newBg;
+renderCard(rid,newSurname+newBg,[{chars:newBg,from:`《${entry.work}》· ${entry.title}`,quote:entry.quote+'。'}],info);
+return;
 }
 
+if(info.mode==='imagerySingle'){
+const p=POEMS.find(x=>x.id===info.poemId);
+if(!p){showToast('源诗失效');return}
+const cs=Object.entries(CHAR_FREQ).filter(([c,f])=>f>=20&&!isExcluded(c)&&isUsableChar(c)).map(([c])=>c);
+if(!cs.length){showToast('无可用字');return}
+const quote=p.groups.join('，');
+let newSurname=info.surname;
+let newChar=info.chars;
+if(mode==='surname'){
+newSurname=info.surname;
+let found=null;
+for(let t=0;t<80;t++){const c=rand(cs);if(c===info.chars)continue;if(quote.includes(c)){found=c;break}}
+if(!found){showToast('抽不出新字');return}
+newChar=found;
+}else if(mode==='given'){
+newSurname=rand(SINGLE_SURNAMES);
+newChar=info.chars;
+}else{
+newSurname=rand(SINGLE_SURNAMES);
+let found=null;
+for(let t=0;t<80;t++){const c=rand(cs);if(c===info.chars)continue;if(quote.includes(c)){found=c;break}}
+if(found)newChar=found;
+}
+RESULT_STORE[rid]=[{entryId:p.id,groups:[quote]}];
+info.surname=newSurname;
+info.chars=newChar;
+renderCard(rid,newSurname+newChar,[{chars:newSurname+newChar,from:`《${p.workName}》· ${p.poemTitle}`,quote:quote+'。'}],info);
+return;
+}
+
+if(info.mode==='same'){
+const p=POEMS.find(x=>x.id===info.poemId);
+if(!p){showToast('源诗失效');return}
+let ns=info.surname,nc=info.chars,nq=null;
+if(mode!=='surname')ns=rand(SINGLE_SURNAMES);
+if(mode==='given'){
+nc=info.chars;
+if(RESULT_STORE[rid]&&RESULT_STORE[rid][0]&&RESULT_STORE[rid][0].quote)nq=RESULT_STORE[rid][0].quote;
+else nq=info.rangeGroups.join('。')+'。';
+}else{
+const r=pickTwoFromRange(info.rangeGroups,mode==='surname'?info.chars:null);
+if(!r){showToast('抽不出新字');return}
+nc=r.chars;nq=r.quote;
+}
+RESULT_STORE[rid]=[{entryId:p.id,groups:info.rangeGroups}];
+info.surname=ns;info.chars=nc;
+renderCard(rid,ns+nc,[{chars:nc,from:`《${p.workName}》· ${p.poemTitle}`,quote:nq}],info);
+return;
+}
+
+if(info.mode==='single'){
+const p=POEMS.find(x=>x.id===info.poemId);
+if(!p){showToast('源诗失效');return}
+let ns=info.surname;
+if(mode!=='surname')ns=rand(SINGLE_SURNAMES);
+const ex=(mode==='surname'&&ns===info.surname)?info.chars:null;
+const r=pickOneFromPoem(p,ns,ex);
+if(!r){showToast('抽不出新字');return}
+RESULT_STORE[rid]=[{entryId:p.id,groups:[r.quote]}];
+info.surname=ns;info.chars=r.char;
+renderCard(rid,ns+r.char,[{chars:ns+r.char,from:`《${p.workName}》· ${p.poemTitle}`,quote:r.quote+'。'}],info);
+}
+}
 function undoCard(rid,ev){if(ev){ev.stopPropagation();ev.preventDefault()}const info=REFRESH_INFO[rid];if(!info||!info.history||!info.history.length)return;const pr=info.history.pop();info.surname=pr.surname;info.chars=pr.chars;RESULT_STORE[rid]=pr.sources;renderCard(rid,pr.name,pr.sources,info)}
 
 function setMode(m,b){MODE=m;document.querySelectorAll('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('row-len').classList.toggle('hidden',m==='reverse');document.getElementById('row-refresh').classList.toggle('hidden',m==='reverse');document.getElementById('row-imagery').classList.toggle('hidden',m!=='imagery');document.getElementById('row-reverse').classList.toggle('hidden',m!=='reverse');document.getElementById('scope-panel').classList.add('hidden');document.getElementById('results').innerHTML='';document.getElementById('info').textContent=''}
@@ -556,14 +699,15 @@ if(!INDEX_READY){document.getElementById('results').innerHTML='<div class="empty
 const results=document.getElementById('results'),info=document.getElementById('info');
 results.innerHTML='';info.textContent='';
 if(MODE==='imagery'){
-if(!BIGRAM_READY){buildBigramsLazy().then(()=>doGenerate());return}
 const nl=document.getElementById('nameLen').value;
 const ct=parseInt(document.getElementById('count').value);
 const seen=new Set(),out=[];let g=0;const mg=ct*100;
 while(out.length<ct&&g<mg){g++;const it=nl==='1'?genImagerySingle():genImageryDouble();if(!it||seen.has(it.name))continue;seen.add(it.name);out.push(it)}
-if(!out.length){results.innerHTML='<div class="empty">没生成出意象名。<br>试试降低双字词阈值。</div>';return}
+if(!out.length){results.innerHTML='<div class="empty">没生成出意象名。<br>可能白名单没加载，或双字词阈值太高。</div>';return}
 results.innerHTML=out.map(it=>`<div class="name-card" id="card-${it.rid}">${buildCardHTML(it.rid,it.name,it.sources,REFRESH_INFO[it.rid])}</div>`).join('');
-info.textContent=`模式：意象取名 · 双字词阈值：${BIGRAM_THRESHOLD} · 有效双字词：${getValidBigrams().length} 个`;
+const totalBg=getValidBigrams().length;
+const whiteBg=getWhitelistedBigrams().length;
+info.textContent=`模式：意象取名 · 双字词阈值：${BIGRAM_THRESHOLD} · 高频组合：${totalBg} 个 · 白名单命中：${whiteBg} 个`;
 return;
 }
 if(MODE==='reverse'){const inp=document.getElementById('reverseInput').value.trim();if(!inp){results.innerHTML='<div class="empty">请输入名字</div>';return}const ms=reverseMatch(inp);if(!ms.length){results.innerHTML=`<div class="empty">没找到与「${escapeHtml(inp)}」相关的句子。</div>`;return}results.innerHTML=ms.map(m=>{const faved=isFaved(inp);const sj=escapeAttr(JSON.stringify([{chars:m.hits.join(''),from:'《'+m.workName+'》· '+m.title,quote:m.quote}]));return `<div class="name-card"><button class="star-btn ${faved?'on':''}" data-name="${escapeAttr(inp)}" onclick="toggleFav('${escapeAttr(inp)}',${sj},event)">${faved?'★':'☆'}</button><div class="name-text" onclick="copyName('${escapeAttr(inp)}')">${escapeHtml(inp)}</div><div class="name-source"><b>匹配字：</b>${m.hits.map(c=>escapeHtml(c)).join('、')}<br><b>出处：</b>《${escapeHtml(m.workName)}》· ${escapeHtml(m.title)}<br><span class="quote">「${renderQuote(m.quote,m.hits)}」</span></div></div>`}).join('');info.textContent=`共匹配到 ${ms.length} 条典故`;return}
@@ -579,13 +723,13 @@ info.textContent=`模式：${nl==='1'?'单字名':(MODE==='same'?'同句抽字':
 function initMeta(){const wc=Object.keys(CORPUS).length,pc=countAllPoems();document.getElementById('meta').textContent=`已加载 ${wc} 部典籍 · ${pc} 篇原文`}
 
 async function boot(){
-initOpenCC();loadFavs();loadUserFilters();initMeta();updateBlacklistCount();
+initOpenCC();loadWhitelist();loadFavs();loadUserFilters();initMeta();updateBlacklistCount();
 const so=await idbGet(IDB_ONLINE_KEY)||[];
 if(so.length){addOnlineToCorpus(so);console.log(`[在线] 恢复 ${so.length} 首`)}
 if(countAllPoems()===0){document.getElementById('loadStatus').textContent='data.js 未加载或为空';return}
 buildIndex(false)
 }
-boot();
+window.addEventListener('DOMContentLoaded', boot);
 </script>
 </body>
 </html>
